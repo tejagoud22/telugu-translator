@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 
 // ─── Replace with your Gemini API key (free at aistudio.google.com) ────────
-const GEMINI_API_KEY = "";
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 // ───────────────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a translator specializing in Telangana Telugu slang written in Roman/English script.
