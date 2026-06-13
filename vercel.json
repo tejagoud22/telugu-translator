@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npx --yes vite build",
+  "outputDirectory": "dist",
+  "framework": "vite"
+}
