@@ -1,34 +1,38 @@
 import { useState, useRef } from "react";
 
-// ─── Replace with your Gemini API key (free at aistudio.google.com) ────────
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-// ───────────────────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a translator specializing in Telangana Telugu slang written in Roman/English script.
 
-The user will give you Telugu words written in English letters (Romanized), often in Telangana dialect/slang. Your job:
-1. Translate the meaning into natural English
-2. Do NOT correct or alter the original Telugu words
-3. Do NOT convert to standard Telugu script
-4. Understand Telangana-specific slang, idioms, and expressions
-5. Return ONLY a JSON object with two fields:
-   - "original": the exact input text, unchanged
+The user will give you an audio recording of someone speaking in Telangana Telugu dialect.
+Your job:
+1. Transcribe exactly what was said in Roman/English letters (e.g. "ela unav", "emchestunav") - NOT in Telugu script
+2. Translate the meaning into natural English
+3. Return ONLY a JSON object with two fields:
+   - "original": the transcribed text in Roman letters exactly as spoken
    - "translation": the English meaning
 
-Examples:
-- "ela unav" → {"original": "ela unav", "translation": "how are you"}
-- "emchestunav" → {"original": "emchestunav", "translation": "what are you doing"}
-- "enduku ala chestunnav" → {"original": "enduku ala chestunnav", "translation": "why are you doing that"}
-- "konchem wait cheyyandi" → {"original": "konchem wait cheyyandi", "translation": "please wait a moment"}
-- "em chesav" → {"original": "em chesav", "translation": "what did you do"}
-- "raa bro" → {"original": "raa bro", "translation": "come here bro"}
-- "endi ra" → {"original": "endi ra", "translation": "what's up man"}
-- "poni le" → {"original": "poni le", "translation": "leave it, never mind"}
-- "chala bagundi" → {"original": "chala bagundi", "translation": "very good / it's great"}
+Examples of transcription + translation:
+- Audio says "ela unav" → {"original": "ela unav", "translation": "how are you"}
+- Audio says "emchestunav" → {"original": "emchestunav", "translation": "what are you doing"}
+- Audio says "enduku ala chestunnav" → {"original": "enduku ala chestunnav", "translation": "why are you doing that"}
+- Audio says "konchem wait cheyyandi" → {"original": "konchem wait cheyyandi", "translation": "please wait a moment"}
+- Audio says "em chesav" → {"original": "em chesav", "translation": "what did you do"}
+- Audio says "raa bro" → {"original": "raa bro", "translation": "come here bro"}
+- Audio says "endi ra" → {"original": "endi ra", "translation": "what's up man"}
+- Audio says "poni le" → {"original": "poni le", "translation": "leave it, never mind"}
+- Audio says "chala bagundi" → {"original": "chala bagundi", "translation": "very good / it's great"}
 
 Return ONLY the JSON object, no extra text, no markdown fences.`;
 
-async function translateText(text) {
+async function transcribeAndTranslate(audioBlob) {
+  // Convert blob to base64
+  const base64Audio = await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(",")[1]);
+    reader.readAsDataURL(audioBlob);
+  });
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
 
   const response = await fetch(url, {
@@ -36,7 +40,12 @@ async function translateText(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ parts: [{ text }] }],
+      contents: [{
+        parts: [
+          { inline_data: { mime_type: audioBlob.type || "audio/webm", data: base64Audio } },
+          { text: "Transcribe and translate this Telangana Telugu audio." }
+        ]
+      }],
       generationConfig: { temperature: 0.1 },
     }),
   });
@@ -51,7 +60,7 @@ async function translateText(text) {
   try {
     return JSON.parse(raw.replace(/```json|```/g, "").trim());
   } catch {
-    return { original: text, translation: raw };
+    return { original: raw, translation: "" };
   }
 }
 
@@ -118,100 +127,101 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [copied, setCopied] = useState(false);
   const [manualInput, setManualInput] = useState("");
-  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
 
   const isRecording = status === "recording";
   const isTranslating = status === "translating";
 
-  async function requestMicAndStart() {
-    setStatus("requesting");
+  async function startRecording() {
     setErrorMsg("");
+    setStatus("requesting");
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      startRecognition();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Pick best supported format
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : "audio/ogg";
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const audioBlob = new Blob(chunksRef.current, { type: mimeType });
+        setStatus("translating");
+        try {
+          const result = await transcribeAndTranslate(audioBlob);
+          setTeluguText(result.original);
+          setEnglishText(result.translation);
+          setHistory((prev) =>
+            [{ telugu: result.original, english: result.translation }, ...prev].slice(0, 8)
+          );
+          setStatus("done");
+        } catch (err) {
+          setStatus("error");
+          setErrorMsg("Translation failed: " + err.message);
+        }
+      };
+
+      mediaRecorder.start();
+      setStatus("recording");
+      setTeluguText("");
+      setEnglishText("");
     } catch (err) {
       setStatus("error");
       if (err.name === "NotAllowedError") {
-        setErrorMsg("Microphone access denied. Click the 🔒 lock icon in the address bar → Microphone → Allow → refresh.");
+        setErrorMsg("Microphone access denied. Allow mic permission in your browser and try again.");
       } else {
         setErrorMsg("Could not access microphone: " + err.message);
       }
     }
   }
 
-  function startRecognition() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setStatus("error");
-      setErrorMsg("Speech recognition not supported. Please use Chrome browser.");
-      return;
-    }
-
-    const r = new SR();
-    r.lang = "te-IN";
-    r.continuous = false;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
-    recognitionRef.current = r;
-
-    let finalTranscript = "";
-
-    r.onstart = () => {
-      setStatus("recording");
-      setTeluguText("");
-      setEnglishText("");
-      setErrorMsg("");
-      finalTranscript = "";
-    };
-
-    r.onresult = (e) => {
-      let interim = "";
-      finalTranscript = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalTranscript += t;
-        else interim += t;
-      }
-      setTeluguText(finalTranscript || interim);
-    };
-
-    r.onend = () => {
-      if (finalTranscript.trim()) {
-        runTranslation(finalTranscript.trim());
-      } else {
-        setStatus("idle");
-        setTeluguText("");
-      }
-    };
-
-    r.onerror = (e) => {
-      if (e.error === "not-allowed") {
-        setStatus("error");
-        setErrorMsg("Microphone blocked. Click the 🔒 lock icon → Microphone → Allow → refresh.");
-      } else if (e.error === "no-speech") {
-        setErrorMsg("No speech detected. Try again and speak clearly.");
-        setStatus("idle");
-      } else if (e.error === "network") {
-        setErrorMsg("Network error with speech recognition. Check your internet connection.");
-        setStatus("idle");
-      } else {
-        setErrorMsg("Mic error: " + e.error);
-        setStatus("idle");
-      }
-    };
-
-    r.start();
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+    setStatus("translating");
   }
 
-  function stopRecording() {
-    recognitionRef.current?.stop();
+  function handleMicClick() {
+    if (isRecording) stopRecording();
+    else startRecording();
   }
 
   async function runTranslation(text) {
     setStatus("translating");
     setErrorMsg("");
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
     try {
-      const result = await translateText(text);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: SYSTEM_PROMPT.replace("audio recording", "text input") }] },
+          contents: [{ parts: [{ text }] }],
+          generationConfig: { temperature: 0.1 },
+        }),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error?.message || "Gemini API error");
+      }
+      const data = await response.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      let result;
+      try { result = JSON.parse(raw.replace(/```json|```/g, "").trim()); }
+      catch { result = { original: text, translation: raw }; }
       setTeluguText(result.original);
       setEnglishText(result.translation);
       setHistory((prev) =>
@@ -224,15 +234,9 @@ export default function App() {
     }
   }
 
-  function handleMicClick() {
-    if (isRecording) stopRecording();
-    else requestMicAndStart();
-  }
-
   function handleManualSubmit() {
     const text = manualInput.trim();
     if (!text || isTranslating) return;
-    setTeluguText(text);
     setManualInput("");
     runTranslation(text);
   }
@@ -272,19 +276,14 @@ export default function App() {
         <span style={{ fontSize: 16, color: "rgba(255,255,255,0.3)" }}>→</span>
         <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.02em" }}>english</span>
         <span style={{
-          marginLeft: "auto", fontSize: 11,
-          padding: "3px 10px",
+          marginLeft: "auto", fontSize: 11, padding: "3px 10px",
           border: "0.5px solid rgba(255,255,255,0.15)",
-          borderRadius: 20, color: "rgba(255,255,255,0.4)",
-          letterSpacing: "0.05em"
+          borderRadius: 20, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em"
         }}>TELANGANA</span>
-
-        {/* Gemini badge */}
         <span style={{
           fontSize: 11, padding: "3px 10px",
           border: "0.5px solid rgba(66,133,244,0.4)",
-          borderRadius: 20, color: "rgba(66,133,244,0.8)",
-          letterSpacing: "0.04em"
+          borderRadius: 20, color: "rgba(66,133,244,0.8)", letterSpacing: "0.04em"
         }}>GEMINI</span>
       </div>
 
@@ -314,7 +313,7 @@ export default function App() {
             color: isRecording ? "#e85d5d" : "rgba(255,255,255,0.35)",
           }}>
             {status === "requesting" ? "requesting mic..." :
-             isRecording ? "● listening — tap to stop" :
+             isRecording ? "● recording — tap to stop" :
              isTranslating ? "translating..." :
              "tap to speak"}
           </span>
@@ -322,8 +321,7 @@ export default function App() {
 
         {/* Telugu box */}
         <div style={{
-          background: "rgba(255,255,255,0.03)",
-          border: "0.5px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.03)", border: "0.5px solid rgba(255,255,255,0.08)",
           borderRadius: 12, padding: "1rem 1.25rem", marginBottom: "0.75rem"
         }}>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
@@ -334,7 +332,7 @@ export default function App() {
             color: teluguText ? "#f0ede8" : "rgba(255,255,255,0.2)",
             fontStyle: teluguText ? "normal" : "italic",
           }}>
-            {teluguText || (isRecording ? "listening..." : "your telugu will appear here")}
+            {teluguText || (isRecording ? "recording..." : isTranslating ? "processing..." : "your telugu will appear here")}
           </div>
         </div>
 
@@ -345,8 +343,7 @@ export default function App() {
 
         {/* English box */}
         <div style={{
-          background: "rgba(255,255,255,0.03)",
-          border: "0.5px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.03)", border: "0.5px solid rgba(255,255,255,0.08)",
           borderRadius: 12, padding: "1rem 1.25rem", marginBottom: "1rem"
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
@@ -364,21 +361,16 @@ export default function App() {
             )}
           </div>
           <div style={{ fontSize: 17, lineHeight: 1.6, minHeight: 28 }}>
-            {isTranslating ? (
-              <TranslatingDots />
-            ) : englishText ? (
-              <span style={{ color: "#a8d5b5", fontWeight: 500 }}>{englishText}</span>
-            ) : (
-              <span style={{ color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>translation will appear here</span>
-            )}
+            {isTranslating ? <TranslatingDots /> :
+             englishText ? <span style={{ color: "#a8d5b5", fontWeight: 500 }}>{englishText}</span> :
+             <span style={{ color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>translation will appear here</span>}
           </div>
         </div>
 
         {/* Error */}
         {errorMsg && (
           <div style={{
-            fontSize: 13, color: "#e85d5d",
-            background: "rgba(232,93,93,0.08)",
+            fontSize: 13, color: "#e85d5d", background: "rgba(232,93,93,0.08)",
             border: "0.5px solid rgba(232,93,93,0.2)",
             borderRadius: 8, padding: "0.75rem 1rem", marginBottom: "1rem", lineHeight: 1.5
           }}>
@@ -409,10 +401,8 @@ export default function App() {
               onClick={handleManualSubmit}
               disabled={!manualInput.trim() || isTranslating}
               style={{
-                background: "rgba(255,255,255,0.06)",
-                border: "0.5px solid rgba(255,255,255,0.12)",
-                borderRadius: 8, padding: "0.6rem 1rem",
-                fontSize: 13, color: "#f0ede8",
+                background: "rgba(255,255,255,0.06)", border: "0.5px solid rgba(255,255,255,0.12)",
+                borderRadius: 8, padding: "0.6rem 1rem", fontSize: 13, color: "#f0ede8",
                 cursor: manualInput.trim() && !isTranslating ? "pointer" : "not-allowed",
                 opacity: manualInput.trim() && !isTranslating ? 1 : 0.4,
               }}
@@ -430,10 +420,8 @@ export default function App() {
             </div>
             {history.slice(1).map((h, i) => (
               <div key={i} style={{
-                borderTop: "0.5px solid rgba(255,255,255,0.05)",
-                padding: "0.75rem 0",
-                display: "flex", justifyContent: "space-between",
-                alignItems: "baseline", gap: 12
+                borderTop: "0.5px solid rgba(255,255,255,0.05)", padding: "0.75rem 0",
+                display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12
               }}>
                 <span style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", flexShrink: 0 }}>{h.telugu}</span>
                 <span style={{ fontSize: 13, color: "rgba(168,213,181,0.7)", textAlign: "right" }}>{h.english}</span>
