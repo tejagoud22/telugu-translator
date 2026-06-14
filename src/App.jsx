@@ -324,8 +324,19 @@ export default function App() {
           background: "rgba(255,255,255,0.03)", border: "0.5px solid rgba(255,255,255,0.08)",
           borderRadius: 12, padding: "1rem 1.25rem", marginBottom: "0.75rem"
         }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
-            what you said
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: "0.07em", textTransform: "uppercase" }}>
+              what you said
+            </div>
+            {teluguText && (
+              <button onClick={() => navigator.clipboard.writeText(teluguText)} style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "rgba(255,255,255,0.35)",
+                display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "2px 6px"
+              }}>
+                <CopyIcon /> copy
+              </button>
+            )}
           </div>
           <div style={{
             fontSize: 17, lineHeight: 1.6, minHeight: 28,
