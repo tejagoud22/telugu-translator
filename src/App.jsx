@@ -104,6 +104,17 @@ function CopyIcon() {
   );
 }
 
+function SpeakerIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  );
+}
+
 function TranslatingDots() {
   return (
     <span style={{ display: "inline-flex", gap: 5, alignItems: "center", height: 20 }}>
@@ -127,6 +138,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [copied, setCopied] = useState(false);
   const [manualInput, setManualInput] = useState("");
+  const [ttsInput, setTtsInput] = useState("");
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
 
@@ -249,6 +261,16 @@ export default function App() {
     });
   }
 
+  function speakText(text) {
+    if (!text) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "te-IN";
+    utterance.rate = 0.85;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0f0f10", color: "#f0ede8" }}>
       <style>{`
@@ -266,26 +288,7 @@ export default function App() {
         button:active:not(:disabled) { transform: scale(0.97); }
       `}</style>
 
-      {/* Header */}
-      <div style={{
-        borderBottom: "0.5px solid rgba(255,255,255,0.08)",
-        padding: "1.25rem 1.5rem",
-        display: "flex", alignItems: "center", gap: 10
-      }}>
-        <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.02em" }}>telugu</span>
-        <span style={{ fontSize: 16, color: "rgba(255,255,255,0.3)" }}>→</span>
-        <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.02em" }}>english</span>
-        <span style={{
-          marginLeft: "auto", fontSize: 11, padding: "3px 10px",
-          border: "0.5px solid rgba(255,255,255,0.15)",
-          borderRadius: 20, color: "rgba(255,255,255,0.4)", letterSpacing: "0.05em"
-        }}>TELANGANA</span>
-        <span style={{
-          fontSize: 11, padding: "3px 10px",
-          border: "0.5px solid rgba(66,133,244,0.4)",
-          borderRadius: 20, color: "rgba(66,133,244,0.8)", letterSpacing: "0.04em"
-        }}>GEMINI</span>
-      </div>
+      
 
       <div style={{ maxWidth: 520, margin: "0 auto", padding: "2rem 1.5rem" }}>
 
@@ -335,9 +338,11 @@ export default function App() {
                 display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "2px 6px"
               }}>
                 <CopyIcon /> copy
+                
               </button>
             )}
           </div>
+          
           <div style={{
             fontSize: 17, lineHeight: 1.6, minHeight: 28,
             color: teluguText ? "#f0ede8" : "rgba(255,255,255,0.2)",
@@ -440,6 +445,48 @@ export default function App() {
             ))}
           </div>
         )}
+
+        {/* TTS Section */}
+        <div style={{ marginBottom: "2rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              read it out
+            </div>
+            <button
+              onClick={() => speakText(ttsInput)}
+              disabled={!ttsInput.trim()}
+              title="Read aloud"
+              style={{
+                width: 44, height: 44, borderRadius: "50%",
+                border: "1.5px solid rgba(255,255,255,0.18)",
+                background: ttsInput.trim() ? "rgba(168,213,181,0.1)" : "rgba(255,255,255,0.04)",
+                cursor: ttsInput.trim() ? "pointer" : "not-allowed",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: ttsInput.trim() ? "#a8d5b5" : "rgba(255,255,255,0.2)",
+                flexShrink: 0, marginTop: 2,
+              }}
+            >
+              <SpeakerIcon />
+            </button>
+          </div>
+          <textarea
+            value={ttsInput}
+            onChange={(e) => setTtsInput(e.target.value)}
+            placeholder="paste telugu text here... e.g. ekadiki veltuna"
+            rows={3}
+            style={{
+              width: "100%",
+              background: "rgba(255,255,255,0.04)",
+              border: "0.5px solid rgba(255,255,255,0.1)",
+              borderRadius: 8, padding: "0.6rem 0.875rem",
+              fontSize: 14, color: "#f0ede8", resize: "none",
+              fontFamily: "inherit",
+            }}
+          />
+          <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+            works best in chrome — reads in telugu accent
+          </div>
+        </div>
 
       </div>
     </div>
